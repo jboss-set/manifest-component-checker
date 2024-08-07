@@ -1,0 +1,40 @@
+name: Build
+
+on:
+  push:
+    branches: 
+      - main
+    paths-ignore:
+      - '.gitignore'
+      - 'CODEOWNERS'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'README*'
+  pull_request:
+    paths-ignore:
+      - '.gitignore'
+      - 'CODEOWNERS'
+      - 'LICENSE'
+      - 'NOTICE'
+      - 'README*'
+
+jobs:
+  build:
+    name: Build-JDK${{ matrix.jdk }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        jdk: [ 11, 21 ]
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+    - name: Set up JDK ${{ matrix.jdk }}
+      uses: actions/setup-java@v2
+      with:
+        java-version: "${{ matrix.jdk }}"
+        distribution: 'adopt'
+        cache: maven
+    - name: Build with Maven
+      run: mvn -B clean install
