@@ -34,3 +34,8 @@ jobs:
           #mvn -B release:perform -Pjboss-release
           git push
           git push --tags
+      - name: Create GH release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/component-mapper-${{steps.metadata.outputs.current-version}}-shaded.jar
+          tag_name: ${{steps.metadata.outputs.current-version}}
