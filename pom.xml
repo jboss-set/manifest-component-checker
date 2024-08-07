@@ -11,6 +11,12 @@
     <name>component-mapper</name>
     <!-- FIXME change it to the project's website -->
     <url>http://www.example.com</url>
+    <scm>
+        <connection>scm:git:git@github.com:spyrkob/manifest-component-checker</connection>
+        <developerConnection>scm:git:git@github.com:spyrkob/manifest-component-checker.git</developerConnection>
+        <url>https://github.com/spyrkob/manifest-component-checker</url>
+        <tag>main</tag>
+    </scm>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
