@@ -3,14 +3,13 @@ package org.jboss.set.components;
 import org.apache.commons.lang3.StringUtils;
 import org.jboss.set.components.pnc.PncArtifact;
 import org.jboss.set.components.pnc.PncBuild;
-import org.jboss.set.components.pnc.PncManagerImpl;
+import org.jboss.set.components.pnc.PncManager;
 import org.wildfly.channel.ArtifactCoordinate;
 import org.wildfly.channel.ChannelManifest;
 import org.wildfly.channel.ChannelManifestMapper;
 import org.wildfly.channel.Stream;
 
 import java.net.MalformedURLException;
-import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,9 +24,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class ManifestVerifier {
-    final PncManagerImpl pncManager;
+    final PncManager pncManager;
 
-    public ManifestVerifier(PncManagerImpl pncManager) {
+    public ManifestVerifier(PncManager pncManager) {
         this.pncManager = pncManager;
     }
 
@@ -35,13 +34,15 @@ public class ManifestVerifier {
         final ChannelManifest manifest = ChannelManifestMapper.from(manifestURL);
         final Collection<Stream> streams = manifest.getStreams();
 
-        // GA:V
+        // GA:V - map of artifacts and all the versions found in included PNC build for this artifact
         final ConcurrentMap<String, Collection<ArtifactCoordinate>> components = new ConcurrentHashMap<>();
+        // GA:PNC_BUILD_ID - map of artifacts and all the PNC builds for this artifact
+        final ConcurrentMap<String, Collection<String>> builds = new ConcurrentHashMap<>();
         final Collection<ArtifactCoordinate> imported = new ConcurrentLinkedQueue<>();
         final Collection<ArtifactCoordinate> ungrouped = new ArrayList<>();
 
         // cache GA:Component
-        final Map<String, String> cache = new ConcurrentHashMap<>();
+        final Map<String, BuildInfo> cache = new ConcurrentHashMap<>();
 
         AtomicInteger counter = new AtomicInteger(0);
         streams.parallelStream().forEach((stream)-> {
@@ -49,7 +50,10 @@ public class ManifestVerifier {
             final ArtifactCoordinate artifactCoordinate = stream2Coord(stream);
             System.out.printf("Resolving [%d/%d]: %s%n", counter.getAndIncrement(), streams.size(), artifactCoordinate);
             if (cache.containsKey(cacheKey)) {
-                components.get(cache.get(cacheKey)).add(artifactCoordinate);
+                // we resolved that artifact as part of one of earlier builds, let's just add this
+                final BuildInfo buildInfo = cache.get(cacheKey);
+                components.get(buildInfo.componentName).add(artifactCoordinate);
+                builds.get(buildInfo.componentName).add(buildInfo.buildId);
             } else {
 
                 final PncArtifact artifact = pncManager.getArtifact(artifactCoordinate);
@@ -70,17 +74,19 @@ public class ManifestVerifier {
 
                 components.get(build.getBrewComponent()).add(artifact.getCoordinate());
 
+                builds.putIfAbsent(build.getBrewComponent(), Collections.synchronizedCollection(new HashSet<>()));
+
+                builds.get(build.getBrewComponent()).add(build.getId().getId());
+
                 final List<PncArtifact> componentArtifacts = pncManager.getArtifactsInBuild(build.getId());
 
                 for (PncArtifact componentArtifact : componentArtifacts) {
                     final String compKey = toKey(componentArtifact.getCoordinate().getGroupId(),
                             componentArtifact.getCoordinate().getArtifactId(), componentArtifact.getCoordinate().getVersion());
-                    cache.putIfAbsent(compKey, build.getBrewComponent());
+                    cache.putIfAbsent(compKey, new BuildInfo(build.getBrewComponent(), build.getId()));
                 }
             }
         });
-
-//        boolean violationsFound = false;
 
         final VerificationResult res = new VerificationResult();
 
@@ -88,33 +94,23 @@ public class ManifestVerifier {
             final Collection<ArtifactCoordinate> artifactCoordinates = components.get(componentName);
             final Map<String, List<ArtifactCoordinate>> artifactsByVersion = artifactCoordinates.stream()
                     .collect(Collectors.groupingBy(ArtifactCoordinate::getVersion));
-            if (artifactsByVersion.size() > 1) {
-//                violationsFound = true;
+
+            final Collection<String> buildIDs = builds.get(componentName);
+            if (buildIDs.size() > 1) {
                 res.addViolation(new Violation(componentName, artifactsByVersion));
-//                System.out.println("[ERROR] Component " + componentName + " has multiple versions");
-//                for (String version : artifactsByVersion.keySet()) {
-//                    System.out.println("        " + version);
-//                    for (ArtifactCoordinate artifactCoordinate : artifactsByVersion.get(version)) {
-//                        System.out.println("          * " + artifactCoordinate.getGroupId() + ":" + artifactCoordinate.getArtifactId());
-//                    }
-//
-//                }
+            } else if (artifactsByVersion.size() > 1) {
+                res.addWarning(new Warning("[WARN] Different versions of artifact from the same build:", new ArrayList<>(artifactCoordinates)));
             }
         }
 
 
         if (!imported.isEmpty()) {
-//            System.out.println("[INFO] Ignored imported artifacts:");
-            res.addWarning(new Warning("[INFO] Ignored imported artifacts:", new ArrayList<>(imported)));
+            res.addWarning(new Warning("[WARN] Ignored imported artifacts:", new ArrayList<>(imported)));
         }
-//        imported.forEach(ac->new Warning(""));
-//        imported.forEach(ac->System.out.println("          * " + ac.getGroupId() + ":" + ac.getArtifactId()));
 
         if (!ungrouped.isEmpty()) {
-//            System.out.println("[WARN] Unable to determine components of:");
             res.addWarning(new Warning("[WARN] Unable to determine components of:", new ArrayList<>(imported)));
         }
-//        ungrouped.forEach(ac->System.out.println("          * " + ac.getGroupId() + ":" + ac.getArtifactId()));
 
         return res;
     }
@@ -132,4 +128,15 @@ public class ManifestVerifier {
     private static String toKey(String... parts) {
         return StringUtils.join(parts, ":");
     }
+
+    static class BuildInfo {
+        private final String buildId;
+        private final String componentName;
+
+        public BuildInfo(String componentName, PncBuild.Id buildId) {
+            this.buildId = buildId.getId();
+            this.componentName = componentName;
+        }
+    }
+
 }

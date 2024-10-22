@@ -30,4 +30,12 @@ public class Warning {
 
         return sb.toString();
     }
+
+    @Override
+    public String toString() {
+        return "Warning{" +
+                "message='" + message + '\'' +
+                ", artifactCoordinates=" + artifactCoordinates +
+                '}';
+    }
 }

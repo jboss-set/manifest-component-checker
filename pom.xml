@@ -26,8 +26,10 @@
         <version.com.fasterxml.jackson>2.17.0</version.com.fasterxml.jackson>
         <version.info.picocli>4.7.5</version.info.picocli>
         <version.org.jboss.pnc>2.7.3</version.org.jboss.pnc>
+        <version.org.assertj>3.26.3</version.org.assertj>
         <version.org.junit>5.10.2</version.org.junit>
-        <version.org.wildfly.channel>1.1.0.Final</version.org.wildfly.channel>
+        <version.org.mockito>5.14.2</version.org.mockito>
+        <version.org.wildfly.channel>1.2.1.Final</version.org.wildfly.channel>
     </properties>
 
     <dependencyManagement>
@@ -53,15 +55,34 @@
                 <version>${version.org.jboss.pnc}</version>
             </dependency>
             <dependency>
+                <groupId>org.wildfly.channel</groupId>
+                <artifactId>channel-core</artifactId>
+                <version>${version.org.wildfly.channel}</version>
+            </dependency>
+
+            <dependency>
                 <groupId>org.junit.jupiter</groupId>
                 <artifactId>junit-jupiter-engine</artifactId>
                 <version>${version.org.junit}</version>
                 <scope>test</scope>
             </dependency>
             <dependency>
-                <groupId>org.wildfly.channel</groupId>
-                <artifactId>channel-core</artifactId>
-                <version>${version.org.wildfly.channel}</version>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${version.org.mockito}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${version.org.mockito}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.assertj</groupId>
+                <artifactId>assertj-core</artifactId>
+                <version>${version.org.assertj}</version>
+                <scope>test</scope>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -81,13 +102,29 @@
             <artifactId>rest-client</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.wildfly.channel</groupId>
+            <artifactId>channel-core</artifactId>
+        </dependency>
+
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.wildfly.channel</groupId>
-            <artifactId>channel-core</artifactId>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
