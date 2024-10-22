@@ -1,8 +1,8 @@
 package org.jboss.set.components;
 
-import org.apache.commons.lang3.StringUtils;
 import org.jboss.set.components.pnc.PncArtifact;
 import org.jboss.set.components.pnc.PncBuild;
+import org.jboss.set.components.pnc.PncComponent;
 import org.jboss.set.components.pnc.PncManager;
 import org.wildfly.channel.ArtifactCoordinate;
 import org.wildfly.channel.ChannelManifest;
@@ -13,13 +13,11 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -34,26 +32,24 @@ public class ManifestVerifier {
         final ChannelManifest manifest = ChannelManifestMapper.from(manifestURL);
         final Collection<Stream> streams = manifest.getStreams();
 
-        // GA:V - map of artifacts and all the versions found in included PNC build for this artifact
-        final ConcurrentMap<String, Collection<ArtifactCoordinate>> components = new ConcurrentHashMap<>();
-        // GA:PNC_BUILD_ID - map of artifacts and all the PNC builds for this artifact
-        final ConcurrentMap<String, Collection<String>> builds = new ConcurrentHashMap<>();
+        final BuildRecorder recorder = new BuildRecorder();
+
         final Collection<ArtifactCoordinate> imported = new ConcurrentLinkedQueue<>();
         final Collection<ArtifactCoordinate> ungrouped = new ArrayList<>();
 
-        // cache GA:Component
-        final Map<String, BuildInfo> cache = new ConcurrentHashMap<>();
+        // record all artifacts from resolved builds, so that we don't need to resolve them twice
+        final BuildCache cache = new BuildCache();
 
-        AtomicInteger counter = new AtomicInteger(0);
+        final AtomicInteger counter = new AtomicInteger(0);
         streams.parallelStream().forEach((stream)-> {
-            final String cacheKey = toKey(stream.getGroupId(), stream.getArtifactId(), stream.getVersion());
+            final BuildCache.Key cacheKey = BuildCache.toKey(stream.getGroupId(), stream.getArtifactId(), stream.getVersion());
             final ArtifactCoordinate artifactCoordinate = stream2Coord(stream);
             System.out.printf("Resolving [%d/%d]: %s%n", counter.getAndIncrement(), streams.size(), artifactCoordinate);
-            if (cache.containsKey(cacheKey)) {
+            if (cache.contains(cacheKey)) {
                 // we resolved that artifact as part of one of earlier builds, let's just add this
-                final BuildInfo buildInfo = cache.get(cacheKey);
-                components.get(buildInfo.componentName).add(artifactCoordinate);
-                builds.get(buildInfo.componentName).add(buildInfo.buildId);
+                final BuildCache.Entry buildCacheEntry = cache.get(cacheKey);
+
+                recorder.record(buildCacheEntry.getBuildId(), buildCacheEntry.getComponentName(), artifactCoordinate);
             } else {
 
                 final PncArtifact artifact = pncManager.getArtifact(artifactCoordinate);
@@ -70,34 +66,31 @@ public class ManifestVerifier {
                     return;
                 }
 
-                components.putIfAbsent(build.getBrewComponent(), Collections.synchronizedCollection(new HashSet<>()));
-
-                components.get(build.getBrewComponent()).add(artifact.getCoordinate());
-
-                builds.putIfAbsent(build.getBrewComponent(), Collections.synchronizedCollection(new HashSet<>()));
-
-                builds.get(build.getBrewComponent()).add(build.getId().getId());
+                recorder.record(build.getId(), build.getBrewComponent(), artifactCoordinate);
 
                 final List<PncArtifact> componentArtifacts = pncManager.getArtifactsInBuild(build.getId());
 
                 for (PncArtifact componentArtifact : componentArtifacts) {
-                    final String compKey = toKey(componentArtifact.getCoordinate().getGroupId(),
+                    final BuildCache.Key compKey = BuildCache.toKey(componentArtifact.getCoordinate().getGroupId(),
                             componentArtifact.getCoordinate().getArtifactId(), componentArtifact.getCoordinate().getVersion());
-                    cache.putIfAbsent(compKey, new BuildInfo(build.getBrewComponent(), build.getId()));
+                    cache.cache(compKey, build.getBrewComponent(), build.getId());
                 }
             }
         });
 
         final VerificationResult res = new VerificationResult();
 
-        for (String componentName : components.keySet()) {
-            final Collection<ArtifactCoordinate> artifactCoordinates = components.get(componentName);
+        for (PncComponent component : recorder.recordedComponents()) {
+
+            final Collection<BuildRecord> componentBuild = recorder.recordedBuildsOf(component);
+            final Collection<ArtifactCoordinate> artifactCoordinates = componentBuild.stream()
+                    .flatMap(r->r.includedArtifacts.stream())
+                    .collect(Collectors.toList());
             final Map<String, List<ArtifactCoordinate>> artifactsByVersion = artifactCoordinates.stream()
                     .collect(Collectors.groupingBy(ArtifactCoordinate::getVersion));
 
-            final Collection<String> buildIDs = builds.get(componentName);
-            if (buildIDs.size() > 1) {
-                res.addViolation(new Violation(componentName, artifactsByVersion));
+            if (componentBuild.size() > 1) {
+                res.addViolation(new Violation(component.getName(), artifactsByVersion));
             } else if (artifactsByVersion.size() > 1) {
                 res.addWarning(new Warning("[WARN] Different versions of artifact from the same build:", new ArrayList<>(artifactCoordinates)));
             }
@@ -116,26 +109,42 @@ public class ManifestVerifier {
     }
 
     private static ArtifactCoordinate stream2Coord(Stream stream) {
-        final ArtifactCoordinate artifactCoordinate = new ArtifactCoordinate(
+        return new ArtifactCoordinate(
                 stream.getGroupId(),
                 stream.getArtifactId(),
                 null,
                 null,
                 stream.getVersion());
-        return artifactCoordinate;
     }
 
-    private static String toKey(String... parts) {
-        return StringUtils.join(parts, ":");
+    static class BuildRecorder {
+        Map<PncComponent, Map<PncBuild.Id, Collection<ArtifactCoordinate>>> buildsByComponent = new HashMap<>();
+        void record(PncBuild.Id buildId, PncComponent component, ArtifactCoordinate artifactCoordinate) {
+            buildsByComponent.putIfAbsent(component, new ConcurrentHashMap<>());
+
+            buildsByComponent.get(component).putIfAbsent(buildId, new ConcurrentLinkedQueue<>());
+
+            buildsByComponent.get(component).get(buildId).add(artifactCoordinate);
+        }
+
+        Collection<PncComponent> recordedComponents() {
+            return buildsByComponent.keySet();
+        }
+
+        Collection<BuildRecord> recordedBuildsOf(PncComponent component) {
+            return buildsByComponent.get(component).entrySet().stream()
+                    .map(e->new BuildRecord(e.getKey(), e.getValue()))
+                    .collect(Collectors.toList());
+        }
     }
 
-    static class BuildInfo {
-        private final String buildId;
-        private final String componentName;
+    static class BuildRecord {
+        private final PncBuild.Id buildId;
+        private final List<ArtifactCoordinate> includedArtifacts;
 
-        public BuildInfo(String componentName, PncBuild.Id buildId) {
-            this.buildId = buildId.getId();
-            this.componentName = componentName;
+        public BuildRecord(PncBuild.Id buildId, Collection<ArtifactCoordinate> includedArtifacts) {
+            this.buildId = buildId;
+            this.includedArtifacts = new ArrayList<>(includedArtifacts);
         }
     }
 

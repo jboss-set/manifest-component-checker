@@ -13,6 +13,7 @@ import java.util.Map;
 
 import org.jboss.set.components.pnc.PncArtifact;
 import org.jboss.set.components.pnc.PncBuild;
+import org.jboss.set.components.pnc.PncComponent;
 import org.jboss.set.components.pnc.PncManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,7 +45,7 @@ class ManifestVerifierTest {
                 new PncArtifact.Id("efgh"),
                 new ArtifactCoordinate("io.opentelemetry", "opentelemetry-semconv", "jar", null, "1.29.0.alpha"),
                 false);
-        final PncBuild pncBuild = new PncBuild(new PncBuild.Id("build_1"), "opentelementry");
+        final PncBuild pncBuild = new PncBuild(new PncBuild.Id("build_1"), new PncComponent("opentelementry"));
         when(pncManager.getArtifact(any())).thenReturn(pncArtifactOne);
         when(pncManager.getBuildIdContainingArtifact(new PncArtifact.Id("abcd"))).thenReturn(pncBuild);
         when(pncManager.getArtifactsInBuild(new PncBuild.Id("build_1"))).thenReturn(List.of(pncArtifactOne, pncArtifactTwo));
@@ -84,8 +85,8 @@ class ManifestVerifierTest {
                 new PncArtifact.Id("efgh2"),
                 new ArtifactCoordinate("io.opentelemetry", "opentelemetry-semconv", null, null, "1.29.0.alpha"),
                 false);
-        final PncBuild pncBuildOne = new PncBuild(new PncBuild.Id("build_1"), "opentelemetry");
-        final PncBuild pncBuildTwo = new PncBuild(new PncBuild.Id("build_2"), "opentelemetry");
+        final PncBuild pncBuildOne = new PncBuild(new PncBuild.Id("build_1"), new PncComponent("opentelemetry"));
+        final PncBuild pncBuildTwo = new PncBuild(new PncBuild.Id("build_2"), new PncComponent("opentelemetry"));
         when(pncManager.getArtifact(pncArtifactOneBuild1.getCoordinate())).thenReturn(pncArtifactOneBuild1);
         when(pncManager.getArtifact(pncArtifactTwoBuild2.getCoordinate())).thenReturn(pncArtifactTwoBuild2);
         when(pncManager.getBuildIdContainingArtifact(new PncArtifact.Id("abcd1"))).thenReturn(pncBuildOne);

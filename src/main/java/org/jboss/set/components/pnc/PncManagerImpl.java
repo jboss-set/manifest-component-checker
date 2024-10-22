@@ -69,7 +69,7 @@ public class PncManagerImpl implements PncManager {
         try (var buildClient = new BuildClient(configuration)) {
             var brewComponent = buildClient.getSpecific(buildId).getAttributes().get("BREW_BUILD_NAME");
 
-            return new PncBuild(new PncBuild.Id(buildId), brewComponent);
+            return new PncBuild(new PncBuild.Id(buildId), new PncComponent(brewComponent));
         } catch (RemoteResourceException e) {
             throw new RuntimeException(e);
         }

@@ -5,9 +5,9 @@ import java.util.Objects;
 public class PncBuild {
 
     private final PncBuild.Id id;
-    private final String brewComponent;
+    private final PncComponent brewComponent;
 
-    public PncBuild(Id id, String brewComponent) {
+    public PncBuild(Id id, PncComponent brewComponent) {
         this.id = id;
         this.brewComponent = brewComponent;
     }
@@ -16,7 +16,7 @@ public class PncBuild {
         return id;
     }
 
-    public String getBrewComponent() {
+    public PncComponent getBrewComponent() {
         return brewComponent;
     }
 
