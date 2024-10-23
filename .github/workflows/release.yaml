@@ -30,7 +30,7 @@ jobs:
           git config --global user.name "Component Checker CI"
           git config --global user.email "bspyrkos@redhat.com"
           git checkout -b release
-          mvn -B release:prepare -DreleaseVersion=${{steps.metadata.outputs.current-version}} -DdevelopmentVersion=${{steps.metadata.outputs.next-version}}
+          mvn -B release:prepare -DreleaseVersion=${{steps.metadata.outputs.current-version}} -DdevelopmentVersion=${{steps.metadata.outputs.next-version}} -Pjboss-release
           git checkout ${{github.base_ref}}
           git rebase release
           #mvn -B release:perform -Pjboss-release
