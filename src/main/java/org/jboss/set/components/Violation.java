@@ -4,6 +4,7 @@ import org.wildfly.channel.ArtifactCoordinate;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class Violation {
 
@@ -33,5 +34,26 @@ public class Violation {
             }
         }
         return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        return "Violation{" +
+                "componentName='" + componentName + '\'' +
+                ", artifactsByVersion=" + artifactsByVersion +
+                '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Violation violation = (Violation) o;
+        return Objects.equals(componentName, violation.componentName) && Objects.equals(artifactsByVersion, violation.artifactsByVersion);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(componentName, artifactsByVersion);
     }
 }

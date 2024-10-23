@@ -1,33 +1,30 @@
 package org.jboss.set.components;
 
-import org.apache.commons.lang3.StringUtils;
 import org.jboss.set.components.pnc.PncArtifact;
 import org.jboss.set.components.pnc.PncBuild;
-import org.jboss.set.components.pnc.PncManagerImpl;
+import org.jboss.set.components.pnc.PncComponent;
+import org.jboss.set.components.pnc.PncManager;
 import org.wildfly.channel.ArtifactCoordinate;
 import org.wildfly.channel.ChannelManifest;
 import org.wildfly.channel.ChannelManifestMapper;
 import org.wildfly.channel.Stream;
 
 import java.net.MalformedURLException;
-import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class ManifestVerifier {
-    final PncManagerImpl pncManager;
+    final PncManager pncManager;
 
-    public ManifestVerifier(PncManagerImpl pncManager) {
+    public ManifestVerifier(PncManager pncManager) {
         this.pncManager = pncManager;
     }
 
@@ -35,21 +32,24 @@ public class ManifestVerifier {
         final ChannelManifest manifest = ChannelManifestMapper.from(manifestURL);
         final Collection<Stream> streams = manifest.getStreams();
 
-        // GA:V
-        final ConcurrentMap<String, Collection<ArtifactCoordinate>> components = new ConcurrentHashMap<>();
+        final BuildRecorder recorder = new BuildRecorder();
+
         final Collection<ArtifactCoordinate> imported = new ConcurrentLinkedQueue<>();
         final Collection<ArtifactCoordinate> ungrouped = new ArrayList<>();
 
-        // cache GA:Component
-        final Map<String, String> cache = new ConcurrentHashMap<>();
+        // record all artifacts from resolved builds, so that we don't need to resolve them twice
+        final BuildCache cache = new BuildCache();
 
-        AtomicInteger counter = new AtomicInteger(0);
+        final AtomicInteger counter = new AtomicInteger(0);
         streams.parallelStream().forEach((stream)-> {
-            final String cacheKey = toKey(stream.getGroupId(), stream.getArtifactId(), stream.getVersion());
+            final BuildCache.Key cacheKey = BuildCache.toKey(stream.getGroupId(), stream.getArtifactId(), stream.getVersion());
             final ArtifactCoordinate artifactCoordinate = stream2Coord(stream);
             System.out.printf("Resolving [%d/%d]: %s%n", counter.getAndIncrement(), streams.size(), artifactCoordinate);
-            if (cache.containsKey(cacheKey)) {
-                components.get(cache.get(cacheKey)).add(artifactCoordinate);
+            if (cache.contains(cacheKey)) {
+                // we resolved that artifact as part of one of earlier builds, let's just add this
+                final BuildCache.Entry buildCacheEntry = cache.get(cacheKey);
+
+                recorder.record(buildCacheEntry.getBuildId(), buildCacheEntry.getComponentName(), artifactCoordinate);
             } else {
 
                 final PncArtifact artifact = pncManager.getArtifact(artifactCoordinate);
@@ -66,70 +66,86 @@ public class ManifestVerifier {
                     return;
                 }
 
-                components.putIfAbsent(build.getBrewComponent(), Collections.synchronizedCollection(new HashSet<>()));
-
-                components.get(build.getBrewComponent()).add(artifact.getCoordinate());
+                recorder.record(build.getId(), build.getBrewComponent(), artifactCoordinate);
 
                 final List<PncArtifact> componentArtifacts = pncManager.getArtifactsInBuild(build.getId());
 
                 for (PncArtifact componentArtifact : componentArtifacts) {
-                    final String compKey = toKey(componentArtifact.getCoordinate().getGroupId(),
+                    final BuildCache.Key compKey = BuildCache.toKey(componentArtifact.getCoordinate().getGroupId(),
                             componentArtifact.getCoordinate().getArtifactId(), componentArtifact.getCoordinate().getVersion());
-                    cache.putIfAbsent(compKey, build.getBrewComponent());
+                    cache.cache(compKey, build.getBrewComponent(), build.getId());
                 }
             }
         });
 
-//        boolean violationsFound = false;
-
         final VerificationResult res = new VerificationResult();
 
-        for (String componentName : components.keySet()) {
-            final Collection<ArtifactCoordinate> artifactCoordinates = components.get(componentName);
+        for (PncComponent component : recorder.recordedComponents()) {
+
+            final Collection<BuildRecord> componentBuild = recorder.recordedBuildsOf(component);
+            final Collection<ArtifactCoordinate> artifactCoordinates = componentBuild.stream()
+                    .flatMap(r->r.includedArtifacts.stream())
+                    .collect(Collectors.toList());
             final Map<String, List<ArtifactCoordinate>> artifactsByVersion = artifactCoordinates.stream()
                     .collect(Collectors.groupingBy(ArtifactCoordinate::getVersion));
-            if (artifactsByVersion.size() > 1) {
-//                violationsFound = true;
-                res.addViolation(new Violation(componentName, artifactsByVersion));
-//                System.out.println("[ERROR] Component " + componentName + " has multiple versions");
-//                for (String version : artifactsByVersion.keySet()) {
-//                    System.out.println("        " + version);
-//                    for (ArtifactCoordinate artifactCoordinate : artifactsByVersion.get(version)) {
-//                        System.out.println("          * " + artifactCoordinate.getGroupId() + ":" + artifactCoordinate.getArtifactId());
-//                    }
-//
-//                }
+
+            if (componentBuild.size() > 1) {
+                res.addViolation(new Violation(component.getName(), artifactsByVersion));
+            } else if (artifactsByVersion.size() > 1) {
+                res.addWarning(new Warning("[WARN] Different versions of artifact from the same build:", new ArrayList<>(artifactCoordinates)));
             }
         }
 
 
         if (!imported.isEmpty()) {
-//            System.out.println("[INFO] Ignored imported artifacts:");
-            res.addWarning(new Warning("[INFO] Ignored imported artifacts:", new ArrayList<>(imported)));
+            res.addWarning(new Warning("[WARN] Ignored imported artifacts:", new ArrayList<>(imported)));
         }
-//        imported.forEach(ac->new Warning(""));
-//        imported.forEach(ac->System.out.println("          * " + ac.getGroupId() + ":" + ac.getArtifactId()));
 
         if (!ungrouped.isEmpty()) {
-//            System.out.println("[WARN] Unable to determine components of:");
             res.addWarning(new Warning("[WARN] Unable to determine components of:", new ArrayList<>(imported)));
         }
-//        ungrouped.forEach(ac->System.out.println("          * " + ac.getGroupId() + ":" + ac.getArtifactId()));
 
         return res;
     }
 
     private static ArtifactCoordinate stream2Coord(Stream stream) {
-        final ArtifactCoordinate artifactCoordinate = new ArtifactCoordinate(
+        return new ArtifactCoordinate(
                 stream.getGroupId(),
                 stream.getArtifactId(),
                 null,
                 null,
                 stream.getVersion());
-        return artifactCoordinate;
     }
 
-    private static String toKey(String... parts) {
-        return StringUtils.join(parts, ":");
+    static class BuildRecorder {
+        Map<PncComponent, Map<PncBuild.Id, Collection<ArtifactCoordinate>>> buildsByComponent = new HashMap<>();
+        void record(PncBuild.Id buildId, PncComponent component, ArtifactCoordinate artifactCoordinate) {
+            buildsByComponent.putIfAbsent(component, new ConcurrentHashMap<>());
+
+            buildsByComponent.get(component).putIfAbsent(buildId, new ConcurrentLinkedQueue<>());
+
+            buildsByComponent.get(component).get(buildId).add(artifactCoordinate);
+        }
+
+        Collection<PncComponent> recordedComponents() {
+            return buildsByComponent.keySet();
+        }
+
+        Collection<BuildRecord> recordedBuildsOf(PncComponent component) {
+            return buildsByComponent.get(component).entrySet().stream()
+                    .map(e->new BuildRecord(e.getKey(), e.getValue()))
+                    .collect(Collectors.toList());
+        }
     }
+
+    static class BuildRecord {
+        private final PncBuild.Id buildId;
+        private final List<ArtifactCoordinate> includedArtifacts;
+
+        public BuildRecord(PncBuild.Id buildId, Collection<ArtifactCoordinate> includedArtifacts) {
+            this.buildId = buildId;
+            this.includedArtifacts = new ArrayList<>(includedArtifacts);
+        }
+    }
+
 }
