@@ -13,7 +13,6 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -118,13 +117,11 @@ public class ManifestVerifier {
     }
 
     static class BuildRecorder {
-        Map<PncComponent, Map<PncBuild.Id, Collection<ArtifactCoordinate>>> buildsByComponent = new HashMap<>();
+        Map<PncComponent, Map<PncBuild.Id, Collection<ArtifactCoordinate>>> buildsByComponent = new ConcurrentHashMap<>();
         void record(PncBuild.Id buildId, PncComponent component, ArtifactCoordinate artifactCoordinate) {
-            buildsByComponent.putIfAbsent(component, new ConcurrentHashMap<>());
-
-            buildsByComponent.get(component).putIfAbsent(buildId, new ConcurrentLinkedQueue<>());
-
-            buildsByComponent.get(component).get(buildId).add(artifactCoordinate);
+            Map<PncBuild.Id, Collection<ArtifactCoordinate>> buildToArtifacts = buildsByComponent.computeIfAbsent(component, k -> new ConcurrentHashMap<>());
+            Collection<ArtifactCoordinate> artifacts = buildToArtifacts.computeIfAbsent(buildId, k -> new ConcurrentLinkedQueue<>());
+            artifacts.add(artifactCoordinate);
         }
 
         Collection<PncComponent> recordedComponents() {
