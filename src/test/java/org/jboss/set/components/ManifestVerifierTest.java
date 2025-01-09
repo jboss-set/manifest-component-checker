@@ -112,4 +112,27 @@ class ManifestVerifierTest {
                 )));
     }
 
+    @Test
+    public void nonExistingArtifactVersion_Warning() throws Exception {
+        final ManifestVerifier manifestVerifier = new ManifestVerifier(pncManager);
+        final PncArtifact pncArtifactBuild = new PncArtifact(
+                new PncArtifact.Id("abcd1"),
+                new ArtifactCoordinate("io.opentelemetry", "opentelemetry-context", null, null, "1.29.0"),
+                false);
+        when(pncManager.getArtifact(pncArtifactBuild.getCoordinate())).thenReturn(null);
+
+        final ChannelManifest manifest = new ChannelManifest.Builder()
+                .setSchemaVersion(ChannelManifestMapper.SCHEMA_VERSION_1_1_0)
+                .addStreams(new Stream("io.opentelemetry", "opentelemetry-context", "1.29.0"))
+                .build();
+        final Path manifestFile = tempDir.resolve("test-manifest.yaml");
+        Files.writeString(manifestFile, ChannelManifestMapper.toYaml(manifest));
+
+        final VerificationResult verificationResult = manifestVerifier.verifyComponents(manifestFile.toUri().toURL());
+
+        assertThat(verificationResult.getViolations()).isEmpty();
+        assertThat(verificationResult.getWarnings())
+                .map(Warning::getMessage)
+                .containsOnly("[WARN] Artifacts not build in PNC:");
+    }
 }

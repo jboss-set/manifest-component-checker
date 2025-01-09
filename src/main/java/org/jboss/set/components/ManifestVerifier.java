@@ -34,6 +34,7 @@ public class ManifestVerifier {
         final BuildRecorder recorder = new BuildRecorder();
 
         final Collection<ArtifactCoordinate> imported = new ConcurrentLinkedQueue<>();
+        final List<ArtifactCoordinate> missingArtifacts = new ArrayList<>();
         final Collection<ArtifactCoordinate> ungrouped = new ArrayList<>();
 
         // record all artifacts from resolved builds, so that we don't need to resolve them twice
@@ -52,6 +53,11 @@ public class ManifestVerifier {
             } else {
 
                 final PncArtifact artifact = pncManager.getArtifact(artifactCoordinate);
+
+                if (artifact == null) {
+                    missingArtifacts.add(artifactCoordinate);
+                    return;
+                }
 
                 if (artifact.isImported()) {
                     imported.add(artifact.getCoordinate());
@@ -93,6 +99,10 @@ public class ManifestVerifier {
             } else if (artifactsByVersion.size() > 1) {
                 res.addWarning(new Warning("[WARN] Different versions of artifact from the same build:", new ArrayList<>(artifactCoordinates)));
             }
+        }
+
+        if (!missingArtifacts.isEmpty()) {
+            res.addWarning(new Warning("[WARN] Artifacts not build in PNC:", missingArtifacts));
         }
 
 

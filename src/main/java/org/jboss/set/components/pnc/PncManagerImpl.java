@@ -11,6 +11,7 @@ import org.wildfly.channel.ArtifactCoordinate;
 
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 public class PncManagerImpl implements PncManager {
@@ -33,9 +34,12 @@ public class PncManagerImpl implements PncManager {
             final var allFiltered = artifactClient.getAllFiltered(coordinate.getGroupId() + ":" + coordinate.getArtifactId() + ":*:" + coordinate.getVersion(),
                     null, null, null);
 
-//            allFiltered.forEach(System.out::println);
-            // TODO: check that all artifacts are coming from the same build
-            final ArtifactInfo artifact = allFiltered.iterator().next();
+            final Iterator<ArtifactInfo> iterator = allFiltered.iterator();
+            if (!iterator.hasNext()) {
+                return null;
+            }
+
+            final ArtifactInfo artifact = iterator.next();
             final var artifactInfo = artifactClient.getSpecific(artifact.getId());
             return new PncArtifact(new PncArtifact.Id(artifact.getId()), parseIdentifier(artifact.getIdentifier()), StringUtils.isNotEmpty(artifactInfo.getOriginUrl()));
         } catch (RemoteResourceException e) {
